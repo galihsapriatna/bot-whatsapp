@@ -1,9 +1,9 @@
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
 const pino = require("pino");
+const qrcode = require("qrcode-terminal"); // npm install qrcode-terminal
 
 let chalk;
 
-// Auto-detect Chalk v4 & v5
 (async () => {
     try {
         chalk = require("chalk");
@@ -23,20 +23,24 @@ let chalk;
 async function startBot() {
     console.log(chalk.blue("🔌 Memulai koneksi ke WhatsApp..."));
 
-    // State login
     const { state, saveCreds } = await useMultiFileAuthState("./GalSesi");
 
     const gal = makeWASocket({
         logger: pino({ level: "silent" }),
         auth: state,
-        printQRInTerminal: true, // QR login pertama kali
     });
 
     gal.ev.on("creds.update", saveCreds);
 
-    // Handle koneksi
     gal.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+
+        // Tangani QR code
+        if (qr) {
+            console.log(chalk.yellow("📲 Scan QR ini untuk login:"));
+            qrcode.generate(qr, { small: true });
+        }
+
         if (connection === "open") {
             console.log(chalk.green("✅ Bot terhubung ke WhatsApp"));
         } else if (connection === "close") {
@@ -47,7 +51,6 @@ async function startBot() {
         }
     });
 
-    // Handler pesan masuk
     gal.ev.on("messages.upsert", async (m) => {
         const msg = m.messages?.[0];
         if (!msg?.message) return;
