@@ -1,32 +1,29 @@
 // ====== Import Module ======
-const { makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys");
+const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const readline = require("readline");
 const { resolve } = require("path");
 const { version } = require("os");
 
-// ====== Auto Deteksi Chalk (v4 dan v5) ======
+// ====== Auto Deteksi Chalk (v4 & v5) ======
 let chalk;
 (async () => {
     try {
-        // Coba import biasa (Chalk v4 / CommonJS)
         chalk = require("chalk");
         if (typeof chalk.blue !== "function") throw new Error("Chalk v5 detected");
-        await connectToWhatsApp(); // jalankan langsung kalau chalk v4
     } catch {
-        // Jika Chalk v5+, import sebagai ESM
         const mod = await import("chalk");
         chalk = new Proxy(mod.default, {
             get(target, prop) {
-                // biar chalk.blue(), chalk.red(), dll tetap berfungsi
                 return target[prop] || ((...args) => target(...args));
             },
         });
-        await connectToWhatsApp(); // jalankan setelah chalk siap
     }
+    // Jalankan hanya sekali
+    await connectToWhatsApp();
 })();
 
-// ====== Opsi Pairing ======
+// ====== Konfigurasi ======
 const usePairingCode = true;
 
 // ====== Fungsi Input Terminal ======
@@ -36,23 +33,18 @@ async function question(prompt) {
         input: process.stdin,
         output: process.stdout,
     });
-
-    return new Promise((resolve) =>
-        rl.question("", (ans) => {
-            rl.close();
-            resolve(ans);
-        })
-    );
+    return new Promise((resolve) => rl.question("", (ans) => {
+        rl.close();
+        resolve(ans);
+    }));
 }
 
-// ====== Koneksi WhatsApp ======
+// ====== Fungsi Koneksi WhatsApp ======
 async function connectToWhatsApp() {
     console.log(chalk.blue("Memulai koneksi ke WhatsApp..."));
 
-    // Simpan sesi login
     const { state, saveCreds } = await useMultiFileAuthState("./GalSesi");
 
-    // Membuat koneksi WhatsApp
     const gal = makeWASocket({
         logger: pino({ level: "silent" }),
         printQRInTerminal: !usePairingCode,
@@ -61,43 +53,46 @@ async function connectToWhatsApp() {
         version: [2, 3000, 1015901307],
     });
 
-    // Pairing code
+    // ====== Pairing Code ======
     if (usePairingCode && !gal.authState.creds.registered) {
-        console.log(chalk.green("Masukkan Nomor Dengan Awalan 62"));
+        console.log(chalk.green("Masukkan Nomor Dengan Awalan 62 (contoh: 6281234567890)"));
         const phoneNumber = await question("=> ");
-        const code = await gal.requestPairingCode(phoneNumber.trim());
-        console.log(chalk.cyan(`Pairing Code: ${code}`));
+        const formattedNumber = phoneNumber.replace(/[^0-9]/g, ""); // bersihkan spasi/simbol
+        if (!formattedNumber.startsWith("62")) {
+            console.log(chalk.red("❌ Nomor harus diawali 62, bukan 0!"));
+            process.exit(1);
+        }
+
+        try {
+            const code = await gal.requestPairingCode(formattedNumber);
+            console.log(chalk.cyan(`✅ Pairing Code Anda: ${code}`));
+        } catch (err) {
+            console.error(chalk.red("❌ Gagal mendapatkan pairing code:"), err.message);
+            process.exit(1);
+        }
     }
 
-    // Simpan sesi login
+    // ====== Simpan Sesi ======
     gal.ev.on("creds.update", saveCreds);
 
-    // Info koneksi
-    gal.ev.on("connection.update", (update) => {
+    // ====== Update Koneksi ======
+    gal.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === "close") {
-            console.log(chalk.red("Koneksi terputus, mencoba menyambungkan ulang..."));
-            connectToWhatsApp();
+            const shouldReconnect =
+                lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log(chalk.red("Koneksi terputus..."), shouldReconnect ? "Menyambung ulang..." : "");
+            if (shouldReconnect) connectToWhatsApp();
         } else if (connection === "open") {
-            console.log(chalk.green("Bot berhasil terhubung ke WhatsApp ✅"));
+            console.log(chalk.green("✅ Bot berhasil terhubung ke WhatsApp!"));
         }
     });
 
-    // Respon pesan masuk
+    // ====== Respon Pesan Masuk ======
     gal.ev.on("messages.upsert", async (m) => {
-        // ✅ Perbaikan: ambil pesan pertama dari array messages
         const msg = m.messages?.[0];
         if (!msg?.message) return;
 
-        // Ambil isi pesan dan info pengirim
-        const body =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            "";
-        const sender = msg.key.remoteJid;
-        const pushname = msg.pushName || "Gal";
-
-        // Jalankan handler eksternal
         try {
             require("./gal")(gal, m);
         } catch (err) {
