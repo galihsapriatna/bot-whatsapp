@@ -1,17 +1,21 @@
 {
     "name": "gal",
-    "version": "1.0",
+    "version": "1.0.0",
     "description": "Bot WhatsApp",
     "main": "index.js",
+    "type": "commonjs",
     "scripts": {
-        "author": "Source Lenwy Edited By Galih Sapriatna",
-        "license": "MIT",
         "start": "node index.js"
     },
+    "author": "Galih Sapriatna",
+    "license": "MIT",
     "dependencies": {
-        "@whiskeysockets/baileys": "7.0.0-rc.6",
-        "chalk": "5.6.2",
-        "pino": "10.1.0",
-        "readline": "1.0.1"
+        "@whiskeysockets/baileys": "^7.0.0-rc.6",
+        "chalk": "^4.1.2",
+        "pino": "^10.1.0",
+        "readline": "^1.0.1"
+    },
+    "optionalDependencies": {
+        "chalk5": "^5.3.0"
     }
 }
